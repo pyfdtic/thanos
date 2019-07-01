@@ -20,7 +20,7 @@ In details:
 
 Prometheus servers connected to the Thanos cluster via the sidecar are subject to a few limitations and recommendations for safe operations:
 
-* The recommended Prometheus version is 2.2.1 or greater (including newest releases). This is due to Prometheus instability in previous versions as well as lack of `flags` endpoint.
+* The recommended Prometheus version is 2.2.1 or greater (including newest releases). This is due to Prometheus instability(不稳定) in previous versions as well as lack of `flags` endpoint.
 * (!) The Prometheus `external_labels` section of the Prometheus configuration file has unique labels in the overall Thanos system. Those external labels will be used by sidecar and then Thanos in many places:
   
   * [Querier](./query.md) to filter out store APIs to touch during query requests.
@@ -30,9 +30,12 @@ Prometheus servers connected to the Thanos cluster via the sidecar are subject t
 
 If you choose to use the sidecar to also upload to object storage:
 
-* The `--storage.tsdb.min-block-duration` and `--storage.tsdb.max-block-duration` must be set to equal values to disable local compaction on order to use Thanos sidecar upload, otherwise leave local compaction on if sidecar just exposes StoreAPI and your retention is normal. The default of `2h` is recommended. 
-  Mentioned parameters set to equal values disable the internal Prometheus compaction, which is needed to avoid the uploaded data corruption when Thanos compactor does its job, this is critical for data consistency and should not be ignored if you plan to use Thanos compactor. Even though you set mentioned parameters equal, you might observe Prometheus internal metric `prometheus_tsdb_compactions_total` being incremented, don't be confused by that: Prometheus writes initial head block to filesytem via internal compaction mechanism, but if you have followed recommendations - data won't be modified by Prometheus before sidecar uploads it. Thanos sidecar will also check sanity of the flags set to Prometheus on the startup and log errors or warning if they have been configured improperly (#838).
-* The retention is recommended to not be lower than three times the min block duration, so 6 hours. This achieves resilience in the face of connectivity issues to the object storage since all local data will remain available within the Thanos cluster. If connectivity gets restored the backlog of blocks gets uploaded to the object storage.
+* The `--storage.tsdb.min-block-duration` and `--storage.tsdb.max-block-duration` must be set to equal values to disable local compaction(压缩) on order to use Thanos sidecar upload, otherwise leave local compaction on if sidecar just exposes StoreAPI and your retention is normal. The default of `2h` is recommended. 
+  Mentioned parameters set to equal values disable the internal Prometheus compaction, which is needed to avoid the uploaded data corruption(腐蚀, 腐败) when Thanos compactor does its job, this is critical for data consistency and should not be ignored if you plan to use Thanos compactor. 
+  
+  Even though you set mentioned(如上所述) parameters equal, you might observe(观察) Prometheus internal metric `prometheus_tsdb_compactions_total` being incremented(增长), don't be confused by that: Prometheus writes initial head block to filesytem via internal compaction mechanism, but if you have followed recommendations(推荐) - data won't be modified by Prometheus before sidecar uploads it. Thanos sidecar will also check sanity(理智, 通情达理) of the flags set to Prometheus on the startup and log errors or warning if they have been configured improperly (#838).
+
+* The retention is recommended to not be lower than three times the min block duration, so 6 hours. This achieves(完成) resilience(快速恢复的能力, 适应力) in the face of connectivity issues to the object storage since all local data will remain available within the Thanos cluster. If connectivity gets restored the backlog of blocks gets uploaded to the object storage.
 
 ## Reloader Configuration
 

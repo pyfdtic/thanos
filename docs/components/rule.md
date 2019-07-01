@@ -6,17 +6,17 @@ menu: components
 
 # Rule (aka Ruler)
 
-_**NOTE:** It is recommended to keep deploying rules inside the relevant Prometheus servers locally. Use ruler only on specific cases. Read details [below](rule.md#risk) why._
+_**NOTE:** It is recommended to keep deploying rules inside the relevant(相关的) Prometheus servers locally. Use ruler only on specific cases. Read details [below](rule.md#risk) why._
 
-_The rule component should in particular not be used to circumvent solving rule deployment properly at the configuration management level._
+_The rule component should in particular(特指的) not be used to circumvent(规避) solving rule deployment properly at the configuration management level._
 
-The rule component evaluates Prometheus recording and alerting rules against chosen query API via repeated `--query` (or FileSD via `--query.sd`). If more than one query is passed, round robin balancing is performed.
+The rule component evaluates(评估) Prometheus recording and alerting rules against(紧靠, 依赖) chosen query API via repeated `--query` (or FileSD via `--query.sd`). If more than one query is passed, round robin balancing is performed.
  
-Rule results are written back to disk in the Prometheus 2.0 storage format. Rule nodes at the same time participate in the system as source store nodes, which means that they expose StoreAPI and upload their generated TSDB blocks to an object store.
+Rule results are written back to disk in the Prometheus 2.0 storage format. Rule nodes at the same time participate(参与) in the system as source store nodes, which means that they expose StoreAPI and upload their generated TSDB blocks to an object store.
 
-You can think of Rule as a simplified Prometheus that does not require a sidecar and does not scrape and do PromQL evaluation (no QueryAPI).
+You can think of Rule as a simplified(简化) Prometheus that does not require a sidecar and does not scrape and do PromQL evaluation (no QueryAPI).
 
-The data of each Rule node can be labeled to satisfy the clusters labeling scheme. High-availability pairs can be run in parallel and should be distinguished by the designated replica label, just like regular Prometheus servers.
+The data of each Rule node can be labeled to satisfy(使...满足) the clusters labeling scheme. High-availability pairs can be run in parallel(并行的) and should be distinguished(区别, 区分) by the designated(指定的) replica label, just like regular Prometheus servers.
 Read more about Ruler in HA [here](rule.md#ruler-ha)
 
 ```bash
@@ -35,13 +35,15 @@ $ thanos rule \
 
 ## Risk
 
-Ruler has conceptual tradeoffs that might not be favorable for most use cases. The main tradeoff is its dependence on 
-query reliability. For Prometheus it is unlikely to have alert/recording rule evaluation failure as evaluation is local.
+Ruler has conceptual(概念上的) tradeoffs(权衡, 取舍) that might not be favorable(赞同, 有利) for most use cases. The main tradeoff is its dependence(依赖) on 
+query reliability. For Prometheus it is unlikely to have alert/recording rule evaluation failure as evaluation(评估) is local.
 
-For Ruler the read path is distributed, since most likely Ruler is querying Thanos Querier which gets data from remote Store APIs. 
+For Ruler the read path is distributed(分布式的), since most likely Ruler is querying Thanos Querier which gets data from remote Store APIs. 
 
 This means that **query failure** are more likely to happen, that's why clear strategy on what will happen to alert and during query
 unavailability is the key.
+
+
 
 ## Partial Response
 
@@ -69,11 +71,11 @@ groups:
 
 It is recommended to keep partial response as `abort` for alerts and that is the default as well.
 
-Essentially, for alerting, having partial response can result in symptoms being missed by Rule's alert.
+Essentially(本质上), for alerting, having partial response can result in symptoms(征兆, 症状) being missed by Rule's alert.
 
-## Must have: essential Ruler alerts! 
+## Must have: essential(必不可少的) Ruler alerts! 
 
-To be sure that alerting works it is essential to monitor Ruler and alert from another **Scraper (Prometheus + sidecar)** that sits in same cluster.
+To be sure that alerting works it is essential(极其重要的, 必不可少的) to monitor Ruler and alert from another **Scraper (Prometheus + sidecar)** that sits in same cluster.
 
 The most important metrics to alert on are:
 
@@ -93,31 +95,32 @@ too complex query expression in rule.
 value as "warn", this metric will tell you how many evaluation ended up with some kind of warning. To see the actual warnings
 see WARN log level. This might suggest that those evaluations return partial response and might not be accurate.
 
-Those metrics are important for vanilla Prometheus as well, but even more important when we rely on (sometimes WAN) network.
+Those metrics are important for vanilla(普通的) Prometheus as well, but even more important when we rely on (sometimes WAN) network.
 
 // TODO(bwplotka): Rereview them after recent changes in metrics.
 
 See [alerts](/examples/alerts/alerts.md#Ruler) for more example alerts for ruler. 
 
-NOTE: It is also recommended to set a mocked Alert on Ruler that checks if Query is up. This might be something simple like `vector(1)` query, just
+NOTE: It is also recommended to set a mocked(模仿) Alert on Ruler that checks if Query is up. This might be something simple like `vector(1)` query, just
 to check if Querier is live.
 
 ## Performance.
 
-As rule nodes outsource query processing to query nodes, they should generally experience little load. If necessary, functional sharding can be applied by splitting up the sets of rules between HA pairs.
-Rules are processed with deduplicated data according to the replica label configured on query nodes.
+As rule nodes outsource(交外办理, 外购) query processing to query nodes, they should generally experience little load. If necessary, functional sharding can be applied by splitting up the sets of rules between HA pairs.
+
+Rules are processed with deduplicated(去重) data according to the replica label configured on query nodes.
 
 ## External labels
 
-It is *mandatory* to add certain external labels to indicate the ruler origin (e.g `label='replica="A"'` or for `cluster`). 
-Otherwise running multiple ruler replicas will be not possible, resulting in clash during compaction.
+It is *mandatory(强制的)* to add certain external labels to indicate(表明, 显示) the ruler origin(起源, 来源) (e.g `label='replica="A"'` or for `cluster`). 
+Otherwise running multiple ruler replicas will be not possible, resulting in clash(冲突) during compaction(压缩).
 
 NOTE: It is advised to put different external labels than labels given by other sources we are recording or alerting against.
 
 For example:
 
 * Ruler is in cluster `mon1` and we have Prometheus in cluster `eu1`
-* By default we could try having consistent labels so we have `cluster=eu1` for Prometheus and `cluster=mon1` for Ruler.
+* By default we could try having consistent(一致的) labels so we have `cluster=eu1` for Prometheus and `cluster=mon1` for Ruler.
 * We configure `ScraperIsDown` alert that monitors service from `work1` cluster.
 * When triggered this alert results in `ScraperIsDown{cluster=mon1}` since external labels always *replace* source labels.
 
@@ -131,7 +134,7 @@ Each alert is linked to the query that the alert is performing, which you can cl
 
 ## Ruler HA
 
-Ruler aims to use a similar approach to the one that Prometheus has. You can configure external labels, as well as simple relabelling.
+Ruler aims to use a similar approach(方法, 方式) to the one that Prometheus has. You can configure external labels, as well as simple relabelling.
 
 In case of Ruler in HA you need to make sure you have the following labelling setup:
 
