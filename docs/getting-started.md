@@ -27,7 +27,7 @@ Thanos will work in cloud native environments as well as more traditional ones. 
 
 ## Get Thanos!
 
-You can find the latest Thanos release [here](https://github.com/improbable-eng/thanos/releases).
+You can find the latest Thanos release [here](https://github.com/thanos-io/thanos/releases).
 
 
 If you want to build Thanos from source you would need a working installation of the Go [toolchain](https://github.com/golang/tools) (`GOPATH`, `PATH=${GOPATH}/bin:${PATH}`).
@@ -35,8 +35,8 @@ If you want to build Thanos from source you would need a working installation of
 Thanos can be downloaded and built by running:
 
 ```bash
-go get -d github.com/improbable-eng/thanos/...
-cd ${GOPATH}/src/github.com/improbable-eng/thanos
+go get -d github.com/thanos-io/thanos/...
+cd ${GOPATH}/src/github.com/thanos-io/thanos
 make
 ```
 
@@ -243,3 +243,29 @@ TBD
 Thanos also has a tutorial on deploying it to Kubernetes. We have a full page describing a standard deployment here.
 
 We also have example Grafana dashboards [here](/examples/grafana/monitoring.md) and some [alerts](/examples/alerts/alerts.md) to get you started.
+
+## Testing Thanos on Single Host
+
+We don't recommend running Thanos on a single node on production.
+Thanos is designed and built to run as a distributed system.
+Vanilla Prometheus might be totally enough for small setups.
+
+However, in case you want to play and run Thanos components
+on a single node, we recommend following the port layout:
+
+| Component | Interface               | Port  |
+| --------- | ----------------------- | ----- |
+| Sidecar   | gRPC                    | 10901 |
+| Sidecar   | HTTP                    | 10902 |
+| Query     | gRPC                    | 10903 |
+| Query     | HTTP                    | 10904 |
+| Store     | gRPC                    | 10905 |
+| Store     | HTTP                    | 10906 |
+| Receive   | gRPC (store API)        | 10907 |
+| Receive   | HTTP (remote write API) | 10908 |
+| Receive   | HTTP                    | 10909 |
+| Rule      | gRPC                    | 10910 |
+| Rule      | HTTP                    | 10911 |
+| Compact   | HTTP                    | 10912 |
+
+You can see example one-node setup [here](/scripts/quickstart.sh)

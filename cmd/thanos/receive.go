@@ -10,21 +10,20 @@ import (
 
 	"github.com/go-kit/kit/log"
 	"github.com/go-kit/kit/log/level"
-	"github.com/improbable-eng/thanos/pkg/block/metadata"
-	"github.com/improbable-eng/thanos/pkg/component"
-	"github.com/improbable-eng/thanos/pkg/objstore/client"
-	"github.com/improbable-eng/thanos/pkg/receive"
-	"github.com/improbable-eng/thanos/pkg/runutil"
-	"github.com/improbable-eng/thanos/pkg/shipper"
-	"github.com/improbable-eng/thanos/pkg/store"
-	"github.com/improbable-eng/thanos/pkg/store/storepb"
 	"github.com/oklog/run"
 	opentracing "github.com/opentracing/opentracing-go"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/storage/tsdb"
-	"github.com/prometheus/tsdb/labels"
+	"github.com/prometheus/prometheus/tsdb/labels"
+	"github.com/thanos-io/thanos/pkg/block/metadata"
+	"github.com/thanos-io/thanos/pkg/component"
+	"github.com/thanos-io/thanos/pkg/objstore/client"
+	"github.com/thanos-io/thanos/pkg/receive"
+	"github.com/thanos-io/thanos/pkg/runutil"
+	"github.com/thanos-io/thanos/pkg/shipper"
+	"github.com/thanos-io/thanos/pkg/store"
 	"google.golang.org/grpc"
 	kingpin "gopkg.in/alecthomas/kingpin.v2"
 )
@@ -257,10 +256,7 @@ func runReceive(
 			err error
 		)
 		g.Add(func() error {
-			select {
-			case <-dbOpen:
-				break
-			}
+			<-dbOpen
 
 			l, err = net.Listen("tcp", grpcBindAddr)
 			if err != nil {
@@ -270,21 +266,17 @@ func runReceive(
 			db := localStorage.Get()
 			tsdbStore := store.NewTSDBStore(log.With(logger, "component", "thanos-tsdb-store"), reg, db, component.Receive, lset)
 
-			opts, err := defaultGRPCServerOpts(logger, reg, tracer, cert, key, clientCA)
+			opts, err := defaultGRPCServerOpts(logger, cert, key, clientCA)
 			if err != nil {
 				return errors.Wrap(err, "setup gRPC server")
 			}
-			s = grpc.NewServer(opts...)
-			storepb.RegisterStoreServer(s, tsdbStore)
+			s := newStoreGRPCServer(logger, reg, tracer, tsdbStore, opts)
 
 			level.Info(logger).Log("msg", "listening for StoreAPI gRPC", "address", grpcBindAddr)
 			return errors.Wrap(s.Serve(l), "serve gRPC")
 		}, func(error) {
 			if s != nil {
 				s.Stop()
-			}
-			if l != nil {
-				runutil.CloseWithLogOnErr(logger, l, "store gRPC listener")
 			}
 		})
 	}

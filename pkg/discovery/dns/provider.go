@@ -8,8 +8,8 @@ import (
 
 	"github.com/go-kit/kit/log"
 	"github.com/go-kit/kit/log/level"
-	"github.com/improbable-eng/thanos/pkg/discovery/dns/miekgdns"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/thanos-io/thanos/pkg/discovery/dns/miekgdns"
 )
 
 // Provider is a stateful cache for asynchronous DNS resolutions. It provides a way to resolve addresses and obtain them.
@@ -97,7 +97,6 @@ func (p *Provider) Resolve(ctx context.Context, addrs []string) {
 		p.resolverLookupsCount.Inc()
 		if err != nil {
 			// The DNS resolution failed. Continue without modifying the old records.
-			p.resolved[addr] = p.resolved[addr] // Ensure metrics capture the result even if empty.
 			p.resolverFailuresCount.Inc()
 			level.Error(p.logger).Log("msg", "dns resolution failed", "addr", addr, "err", err)
 			continue

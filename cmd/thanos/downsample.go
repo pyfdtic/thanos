@@ -2,30 +2,27 @@ package main
 
 import (
 	"context"
-	"encoding/json"
-	"io/ioutil"
 	"os"
-	"path"
 	"path/filepath"
 	"time"
 
 	"github.com/go-kit/kit/log"
 	"github.com/go-kit/kit/log/level"
-	"github.com/improbable-eng/thanos/pkg/block"
-	"github.com/improbable-eng/thanos/pkg/block/metadata"
-	"github.com/improbable-eng/thanos/pkg/compact"
-	"github.com/improbable-eng/thanos/pkg/compact/downsample"
-	"github.com/improbable-eng/thanos/pkg/component"
-	"github.com/improbable-eng/thanos/pkg/objstore"
-	"github.com/improbable-eng/thanos/pkg/objstore/client"
-	"github.com/improbable-eng/thanos/pkg/runutil"
 	"github.com/oklog/run"
 	"github.com/oklog/ulid"
 	opentracing "github.com/opentracing/opentracing-go"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/tsdb"
-	"github.com/prometheus/tsdb/chunkenc"
+	"github.com/prometheus/prometheus/tsdb"
+	"github.com/prometheus/prometheus/tsdb/chunkenc"
+	"github.com/thanos-io/thanos/pkg/block"
+	"github.com/thanos-io/thanos/pkg/block/metadata"
+	"github.com/thanos-io/thanos/pkg/compact"
+	"github.com/thanos-io/thanos/pkg/compact/downsample"
+	"github.com/thanos-io/thanos/pkg/component"
+	"github.com/thanos-io/thanos/pkg/objstore"
+	"github.com/thanos-io/thanos/pkg/objstore/client"
+	"github.com/thanos-io/thanos/pkg/runutil"
 	kingpin "gopkg.in/alecthomas/kingpin.v2"
 )
 
@@ -148,21 +145,9 @@ func downsampleBucket(
 			return nil
 		}
 
-		rc, err := bkt.Get(ctx, path.Join(id.String(), block.MetaFilename))
+		m, err := block.DownloadMeta(ctx, logger, bkt, id)
 		if err != nil {
-			return errors.Wrapf(err, "get meta for block %s", id)
-		}
-		defer runutil.CloseWithLogOnErr(logger, rc, "block reader")
-
-		var m metadata.Meta
-
-		obj, err := ioutil.ReadAll(rc)
-		if err != nil {
-			return errors.Wrap(err, "read meta")
-		}
-
-		if err = json.Unmarshal(obj, &m); err != nil {
-			return errors.Wrap(err, "unmarshal meta")
+			return errors.Wrap(err, "download metadata")
 		}
 
 		metas = append(metas, &m)
@@ -297,8 +282,6 @@ func processDownsampling(ctx context.Context, logger log.Logger, bkt objstore.Bu
 	}
 
 	level.Info(logger).Log("msg", "uploaded block", "id", id, "duration", time.Since(begin))
-
-	begin = time.Now()
 
 	// It is not harmful if these fails.
 	if err := os.RemoveAll(bdir); err != nil {

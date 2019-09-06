@@ -8,10 +8,10 @@ import (
 	"testing"
 
 	"github.com/go-kit/kit/log"
-	"github.com/improbable-eng/thanos/pkg/block/metadata"
-	"github.com/improbable-eng/thanos/pkg/testutil"
 	"github.com/oklog/ulid"
-	"github.com/prometheus/tsdb"
+	"github.com/prometheus/prometheus/tsdb"
+	"github.com/thanos-io/thanos/pkg/block/metadata"
+	"github.com/thanos-io/thanos/pkg/testutil"
 )
 
 func TestShipperTimestamps(t *testing.T) {
@@ -27,7 +27,7 @@ func TestShipperTimestamps(t *testing.T) {
 	_, _, err = s.Timestamps()
 	testutil.NotOk(t, err)
 
-	meta := &Meta{Version: 1}
+	meta := &Meta{Version: MetaVersion1}
 	testutil.Ok(t, WriteMetaFile(log.NewNopLogger(), dir, meta))
 
 	// Nothing uploaded, nothing in the filesystem. We assume that
@@ -40,11 +40,11 @@ func TestShipperTimestamps(t *testing.T) {
 	id1 := ulid.MustNew(1, nil)
 	testutil.Ok(t, os.Mkdir(path.Join(dir, id1.String()), os.ModePerm))
 	testutil.Ok(t, metadata.Write(log.NewNopLogger(), path.Join(dir, id1.String()), &metadata.Meta{
-		Version: 1,
 		BlockMeta: tsdb.BlockMeta{
 			ULID:    id1,
 			MaxTime: 2000,
 			MinTime: 1000,
+			Version: 1,
 		},
 	}))
 	mint, maxt, err = s.Timestamps()
@@ -55,11 +55,11 @@ func TestShipperTimestamps(t *testing.T) {
 	id2 := ulid.MustNew(2, nil)
 	testutil.Ok(t, os.Mkdir(path.Join(dir, id2.String()), os.ModePerm))
 	testutil.Ok(t, metadata.Write(log.NewNopLogger(), path.Join(dir, id2.String()), &metadata.Meta{
-		Version: 1,
 		BlockMeta: tsdb.BlockMeta{
 			ULID:    id2,
 			MaxTime: 4000,
 			MinTime: 2000,
+			Version: 1,
 		},
 	}))
 	mint, maxt, err = s.Timestamps()
@@ -68,7 +68,7 @@ func TestShipperTimestamps(t *testing.T) {
 	testutil.Equals(t, int64(math.MinInt64), maxt)
 
 	meta = &Meta{
-		Version:  1,
+		Version:  MetaVersion1,
 		Uploaded: []ulid.ULID{id1},
 	}
 	testutil.Ok(t, WriteMetaFile(log.NewNopLogger(), dir, meta))

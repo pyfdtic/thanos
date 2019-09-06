@@ -4,19 +4,25 @@ import (
 	"context"
 	"io/ioutil"
 	"math"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/fortytw2/leaktest"
-	"github.com/improbable-eng/thanos/pkg/block/metadata"
-	"github.com/improbable-eng/thanos/pkg/compact/downsample"
-	"github.com/improbable-eng/thanos/pkg/store/storepb"
-	"github.com/improbable-eng/thanos/pkg/testutil"
+	"github.com/go-kit/kit/log"
 	"github.com/leanovate/gopter"
 	"github.com/leanovate/gopter/gen"
 	"github.com/leanovate/gopter/prop"
 	"github.com/oklog/ulid"
-	"github.com/prometheus/tsdb/labels"
+	prommodel "github.com/prometheus/common/model"
+	"github.com/prometheus/prometheus/pkg/timestamp"
+	"github.com/prometheus/prometheus/tsdb/labels"
+	"github.com/thanos-io/thanos/pkg/block/metadata"
+	"github.com/thanos-io/thanos/pkg/compact/downsample"
+	"github.com/thanos-io/thanos/pkg/model"
+	"github.com/thanos-io/thanos/pkg/objstore/inmem"
+	"github.com/thanos-io/thanos/pkg/store/storepb"
+	"github.com/thanos-io/thanos/pkg/testutil"
 )
 
 func TestBucketBlock_Property(t *testing.T) {
@@ -77,7 +83,6 @@ func TestBucketBlock_Property(t *testing.T) {
 				return false
 			} else if len(res) > 1 {
 				mint := int64(21001)
-				maxt := int64(0)
 				for i := 0; i < len(res)-1; i++ {
 					if res[i].meta.Thanos.Downsample.Resolution > maxResolution {
 						return false
@@ -88,15 +93,9 @@ func TestBucketBlock_Property(t *testing.T) {
 					if res[i].meta.MinTime < mint {
 						mint = res[i].meta.MinTime
 					}
-					if res[i].meta.MaxTime > maxt {
-						maxt = res[i].meta.MaxTime
-					}
 				}
 				if res[len(res)-1].meta.MinTime < mint {
 					mint = res[len(res)-1].meta.MinTime
-				}
-				if res[len(res)-1].meta.MaxTime > maxt {
-					maxt = res[len(res)-1].meta.MaxTime
 				}
 				if low < mint {
 					return false
@@ -420,10 +419,10 @@ func TestBucketStore_Info(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	dir, err := ioutil.TempDir("", "prometheus-test")
+	dir, err := ioutil.TempDir("", "bucketstore-test")
 	testutil.Ok(t, err)
 
-	bucketStore, err := NewBucketStore(nil, nil, nil, dir, noopCache{}, 2e5, 0, 0, false, 20)
+	bucketStore, err := NewBucketStore(nil, nil, nil, dir, noopCache{}, 2e5, 0, 0, false, 20, filterConf)
 	testutil.Ok(t, err)
 
 	resp, err := bucketStore.Info(ctx, &storepb.InfoRequest{})
@@ -432,4 +431,67 @@ func TestBucketStore_Info(t *testing.T) {
 	testutil.Equals(t, storepb.StoreType_STORE, resp.StoreType)
 	testutil.Equals(t, int64(math.MaxInt64), resp.MinTime)
 	testutil.Equals(t, int64(math.MinInt64), resp.MaxTime)
+}
+
+func TestBucketStore_isBlockInMinMaxRange(t *testing.T) {
+	ctx := context.TODO()
+	dir, err := ioutil.TempDir("", "block-min-max-test")
+	testutil.Ok(t, err)
+
+	series := []labels.Labels{labels.FromStrings("a", "1", "b", "1")}
+	extLset := labels.FromStrings("ext1", "value1")
+
+	// Create a block in range [-2w, -1w]
+	id1, err := testutil.CreateBlock(ctx, dir, series, 10,
+		timestamp.FromTime(time.Now().Add(-14*24*time.Hour)),
+		timestamp.FromTime(time.Now().Add(-7*24*time.Hour)),
+		extLset, 0)
+	testutil.Ok(t, err)
+
+	// Create a block in range [-1w, 0w]
+	id2, err := testutil.CreateBlock(ctx, dir, series, 10,
+		timestamp.FromTime(time.Now().Add(-7*24*time.Hour)),
+		timestamp.FromTime(time.Now().Add(-0*24*time.Hour)),
+		extLset, 0)
+	testutil.Ok(t, err)
+
+	// Create a block in range [+1w, +2w]
+	id3, err := testutil.CreateBlock(ctx, dir, series, 10,
+		timestamp.FromTime(time.Now().Add(7*24*time.Hour)),
+		timestamp.FromTime(time.Now().Add(14*24*time.Hour)),
+		extLset, 0)
+	testutil.Ok(t, err)
+
+	dir1, dir2 := filepath.Join(dir, id1.String()), filepath.Join(dir, id2.String())
+	meta1, err := metadata.Read(dir1)
+	testutil.Ok(t, err)
+	testutil.Ok(t, metadata.Write(log.NewNopLogger(), dir1, meta1))
+
+	meta2, err := metadata.Read(dir2)
+	testutil.Ok(t, err)
+	testutil.Ok(t, metadata.Write(log.NewNopLogger(), dir2, meta2))
+
+	// Run actual test
+	hourBeforeDur := prommodel.Duration(-1 * time.Hour)
+	hourBefore := model.TimeOrDurationValue{Dur: &hourBeforeDur}
+
+	// bucketStore accepts blocks in range [0, now-1h]
+	bucketStore, err := NewBucketStore(nil, nil, inmem.NewBucket(), dir, noopCache{}, 0, 0, 20, false, 20,
+		&FilterConfig{
+			MinTime: minTimeDuration,
+			MaxTime: hourBefore,
+		})
+	testutil.Ok(t, err)
+
+	inRange, err := bucketStore.isBlockInMinMaxRange(context.TODO(), id1)
+	testutil.Ok(t, err)
+	testutil.Equals(t, true, inRange)
+
+	inRange, err = bucketStore.isBlockInMinMaxRange(context.TODO(), id2)
+	testutil.Ok(t, err)
+	testutil.Equals(t, true, inRange)
+
+	inRange, err = bucketStore.isBlockInMinMaxRange(context.TODO(), id3)
+	testutil.Ok(t, err)
+	testutil.Equals(t, false, inRange)
 }

@@ -12,10 +12,10 @@ import (
 	"path/filepath"
 
 	"github.com/go-kit/kit/log"
-	"github.com/improbable-eng/thanos/pkg/runutil"
 	"github.com/pkg/errors"
-	"github.com/prometheus/tsdb"
-	"github.com/prometheus/tsdb/fileutil"
+	"github.com/prometheus/prometheus/tsdb"
+	"github.com/prometheus/prometheus/tsdb/fileutil"
+	"github.com/thanos-io/thanos/pkg/runutil"
 )
 
 type SourceType string
@@ -44,8 +44,6 @@ const (
 // Meta describes the a block's meta. It wraps the known TSDB meta structure and
 // extends it by Thanos-specific fields.
 type Meta struct {
-	Version int `json:"version"`
-
 	tsdb.BlockMeta
 
 	Thanos Thanos `json:"thanos"`

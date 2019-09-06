@@ -12,19 +12,19 @@ import (
 	"strings"
 	"time"
 
-	"github.com/improbable-eng/thanos/pkg/block/metadata"
+	"github.com/thanos-io/thanos/pkg/block/metadata"
 
-	"github.com/prometheus/tsdb/fileutil"
+	"github.com/prometheus/prometheus/tsdb/fileutil"
 
 	"github.com/go-kit/kit/log"
 	"github.com/go-kit/kit/log/level"
-	"github.com/improbable-eng/thanos/pkg/runutil"
 	"github.com/oklog/ulid"
 	"github.com/pkg/errors"
-	"github.com/prometheus/tsdb"
-	"github.com/prometheus/tsdb/chunks"
-	"github.com/prometheus/tsdb/index"
-	"github.com/prometheus/tsdb/labels"
+	"github.com/prometheus/prometheus/tsdb"
+	"github.com/prometheus/prometheus/tsdb/chunks"
+	"github.com/prometheus/prometheus/tsdb/index"
+	"github.com/prometheus/prometheus/tsdb/labels"
+	"github.com/thanos-io/thanos/pkg/runutil"
 )
 
 const (
@@ -175,7 +175,7 @@ func WriteIndexCache(logger log.Logger, indexFn string, fn string) error {
 // ReadIndexCache reads an index cache file.
 func ReadIndexCache(logger log.Logger, fn string) (
 	version int,
-	symbols map[uint32]string,
+	symbols []string,
 	lvals map[string][]string,
 	postings map[labels.Label]index.Range,
 	err error,
@@ -201,6 +201,14 @@ func ReadIndexCache(logger log.Logger, fn string) (
 	lvals = make(map[string][]string, len(v.LabelValues))
 	postings = make(map[labels.Label]index.Range, len(v.Postings))
 
+	var maxSymbolID uint32
+	for o := range v.Symbols {
+		if o > maxSymbolID {
+			maxSymbolID = o
+		}
+	}
+	symbols = make([]string, maxSymbolID+1)
+
 	// Most strings we encounter are duplicates. Dedup string objects that we keep
 	// around after the function returns to reduce total memory usage.
 	// NOTE(fabxc): it could even make sense to deduplicate globally.
@@ -213,7 +221,7 @@ func ReadIndexCache(logger log.Logger, fn string) (
 	}
 
 	for o, s := range v.Symbols {
-		v.Symbols[o] = getStr(s)
+		symbols[o] = getStr(s)
 	}
 	for ln, vals := range v.LabelValues {
 		for i := range vals {
@@ -228,7 +236,7 @@ func ReadIndexCache(logger log.Logger, fn string) (
 		}
 		postings[l] = index.Range{Start: e.Start, End: e.End}
 	}
-	return v.Version, v.Symbols, lvals, postings, nil
+	return v.Version, symbols, lvals, postings, nil
 }
 
 // VerifyIndex does a full run over a block index and verifies that it fulfills the order invariants.
@@ -382,7 +390,7 @@ func GatherIndexIssueStats(logger log.Logger, fn string, minTime int64, maxTime 
 				stats.OutOfOrderLabels++
 				level.Warn(logger).Log("msg",
 					"out-of-order label set: known bug in Prometheus 2.8.0 and below",
-					"labelset", fmt.Sprintf("%s", lset),
+					"labelset", lset.String(),
 					"series", fmt.Sprintf("%d", id),
 				)
 			}
@@ -446,7 +454,7 @@ type ignoreFnType func(mint, maxt int64, prev *chunks.Meta, curr *chunks.Meta) (
 // - all "complete" outsiders (they will not accessed anyway)
 // - removes all near "complete" outside chunks introduced by https://github.com/prometheus/tsdb/issues/347.
 // Fixable inconsistencies are resolved in the new block.
-// TODO(bplotka): https://github.com/improbable-eng/thanos/issues/378
+// TODO(bplotka): https://github.com/thanos-io/thanos/issues/378
 func Repair(logger log.Logger, dir string, id ulid.ULID, source metadata.SourceType, ignoreChkFns ...ignoreFnType) (resid ulid.ULID, err error) {
 	if len(ignoreChkFns) == 0 {
 		return resid, errors.New("no ignore chunk function specified")
@@ -503,10 +511,16 @@ func Repair(logger log.Logger, dir string, id ulid.ULID, source metadata.SourceT
 	resmeta.Stats = tsdb.BlockStats{} // reset stats
 	resmeta.Thanos.Source = source    // update source
 
-	if err := rewrite(indexr, chunkr, indexw, chunkw, &resmeta, ignoreChkFns); err != nil {
+	if err := rewrite(logger, indexr, chunkr, indexw, chunkw, &resmeta, ignoreChkFns); err != nil {
 		return resid, errors.Wrap(err, "rewrite block")
 	}
 	if err := metadata.Write(logger, resdir, &resmeta); err != nil {
+		return resid, err
+	}
+	// TSDB may rewrite metadata in bdir.
+	// TODO: This is not needed in newer TSDB code. See
+	// https://github.com/prometheus/tsdb/pull/637
+	if err := metadata.Write(logger, bdir, meta); err != nil {
 		return resid, err
 	}
 	return resid, nil
@@ -603,6 +617,7 @@ type seriesRepair struct {
 // rewrite writes all data from the readers back into the writers while cleaning
 // up mis-ordered and duplicated chunks.
 func rewrite(
+	logger log.Logger,
 	indexr tsdb.IndexReader, chunkr tsdb.ChunkReader,
 	indexw tsdb.IndexWriter, chunkw tsdb.ChunkWriter,
 	meta *metadata.Meta,
@@ -673,8 +688,22 @@ func rewrite(
 		return labels.Compare(series[i].lset, series[j].lset) < 0
 	})
 
+	lastSet := labels.Labels{}
 	// Build a new TSDB block.
 	for _, s := range series {
+		// The TSDB library will throw an error if we add a series with
+		// identical labels as the last series. This means that we have
+		// discovered a duplicate time series in the old block. We drop
+		// all duplicate series preserving the first one.
+		// TODO: Add metric to count dropped series if repair becomes a daemon
+		// rather than a batch job.
+		if labels.Compare(lastSet, s.lset) == 0 {
+			level.Warn(logger).Log("msg",
+				"dropping duplicate series in tsdb block found",
+				"labelset", s.lset.String(),
+			)
+			continue
+		}
 		if err := chunkw.WriteChunks(s.chks...); err != nil {
 			return errors.Wrap(err, "write chunks")
 		}
@@ -699,6 +728,7 @@ func rewrite(
 		}
 		postings.Add(i, s.lset)
 		i++
+		lastSet = s.lset
 	}
 
 	s := make([]string, 0, 256)
@@ -725,11 +755,6 @@ type stringset map[string]struct{}
 
 func (ss stringset) set(s string) {
 	ss[s] = struct{}{}
-}
-
-func (ss stringset) has(s string) bool {
-	_, ok := ss[s]
-	return ok
 }
 
 func (ss stringset) String() string {
